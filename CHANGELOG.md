@@ -1,3 +1,14 @@
+# v0.9.34 — Runtime hardening + IndexedDB Vault
+
+- Amazon AUTO verifies artwork and fills listing 5/5, then stops for manual product/colour selection.
+- Removed dormant automatic Select Products runtime code.
+- Removed legacy ChatGPT title/query ownership fallbacks; failed batch jobs recover through a canonical clean New chat.
+- Extension updates reload only managed flow tabs; closed Amazon tabs are removed from the runtime registry.
+- Vault artwork payloads live in IndexedDB; chrome.storage.local keeps lightweight metadata and migrates legacy base64 records.
+- ChatGPT observers/polling arm only for a verified owned job.
+- Removed unused activeTab permission.
+- Historical audit files moved to docs/audits/.
+
 # v0.9.33
 
 - Replaced the fixed `top setup + one stick figure + bottom punchline` grammar with job-specific creative lanes.
