@@ -298,6 +298,7 @@ test("v0.9.34 uses strict fresh-chat ownership and removes legacy opener fallbac
   assert.doesNotMatch(popup, /MERCH_FLOW_OPEN_CHAT_V1/);
   assert.doesNotMatch(background, /ensureManagedChatTab|findManagedChatCandidate|managedChatOpenChain/);
   assert.doesNotMatch(background, /Merch \(Flow\|Design\|Listing\)/);
+  assert.doesNotMatch(background, /sender\.tab\?\.title/);
   assert.match(background, /MERCH_FLOW_START_FRESH_CHAT_V1/);
   assert.match(background, /return "https:\/\/chatgpt\.com\/"/);
 });
@@ -576,11 +577,11 @@ test("v0.9.34 manifest has a stable key and synchronized version badge", () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "manifest.json"), "utf8"));
   const html = fs.readFileSync(path.join(__dirname, "..", "popup.html"), "utf8");
   assert.equal(manifest.version, "0.9.34");
-  assert.match(manifest.name, /v0\.9\.33/);
-  assert.match(manifest.description, /v0\.9\.33/);
+  assert.match(manifest.name, /v0\.9\.34/);
+  assert.match(manifest.description, /v0\.9\.34/);
   assert.equal(typeof manifest.key, "string");
   assert.ok(manifest.key.length > 100);
-  assert.match(html, /v0\.9\.33/);
+  assert.match(html, /v0\.9\.34/);
 });
 
 
@@ -907,7 +908,7 @@ test("v0.9.10 recovers managed job ownership after ChatGPT strips query params",
   assert.match(chat, /registeredSessionNonce/);
   assert.match(chat, /registeredJobId/);
   assert.match(chat, /runChatJob\(\{ allowPendingWithoutUrl: true, expectedJobId: pendingChatJob\.jobId \}\)/);
-  assert.match(background, /sessionNonce: String\(message\.sessionNonce \|\| matchedJob\?\.sessionNonce \|\| ""\)/);
+  assert.match(background, /sessionNonce: String\(matchedJob\?\.sessionNonce \|\| message\.sessionNonce \|\| ""\)/);
 });
 
 test("v0.9.10 never resumes a live job in an arbitrary active ChatGPT tab", () => {
@@ -1122,7 +1123,7 @@ test("v0.9.20 claims an existing verified clean Create image composer", () => {
   assert.match(background, /MERCH_FLOW_PROBE_CLEAN_IMAGE_CHAT_V1/);
   assert.match(background, /MERCH_FLOW_CLAIM_CLEAN_IMAGE_CHAT_V1/);
   assert.match(background, /preparedImageMode: Boolean\(preparedImageTab\)/);
-  assert.match(background, /const chatTabs = await chrome\.tabs\.query/);
+  assert.match(background, /const openChatTabs = \(await chrome\.tabs\.query/);
   assert.match(chat, /function composerDraftText/);
   assert.match(chat, /message\?\.type === "MERCH_FLOW_PROBE_CLEAN_IMAGE_CHAT_V1"/);
   assert.match(chat, /message\?\.type === "MERCH_FLOW_CLAIM_CLEAN_IMAGE_CHAT_V1"/);
