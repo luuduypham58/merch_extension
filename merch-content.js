@@ -1,6 +1,6 @@
 (function merchFlowMerch() {
   const Core = globalThis.MerchFlowCore;
-  const SCRIPT_VERSION = "0.9.33";
+  const SCRIPT_VERSION = "0.9.34";
   if (!Core || globalThis.__MERCH_FLOW_MERCH_SCRIPT_VERSION__ === SCRIPT_VERSION) return;
   globalThis.__MERCH_FLOW_MERCH_SCRIPT_VERSION__ = SCRIPT_VERSION;
   globalThis.__MERCH_FLOW_MERCH_SCRIPT_READY__ = true;
@@ -8,10 +8,6 @@
   const FORM_WAIT_MS = 12000;
   const VERIFY_WAIT_MS = 12000;
   const UPLOAD_TTL_MS = 30 * 60 * 1000;
-  const PRODUCT_LIMIT = 10;
-  const PRODUCT_MARKETPLACE = ".com";
-  const PRODUCT_SELECTION_POLICY = "adaptive-book-v3";
-  const PRODUCT_SELECTION_MAX_FAILURES = 3;
   const LISTING_READY_TIMEOUT_MS = 2 * 60 * 1000;
   const REVIEW_READY_TIMEOUT_MS = 45 * 1000;
   const fileCache = new Map();
@@ -24,7 +20,6 @@
   let listingDebounce = 0;
   let listingInterval = 0;
   let listingObserver = null;
-  let productSelectionBusy = false;
 
   const runtimeRegistration = chrome.runtime.sendMessage({
     type: "MERCH_FLOW_REGISTER_MERCH_TAB_V1",
@@ -83,7 +78,6 @@
       let status = autoRun.status || "merch";
       if (tone === "error") status = "needs-attention";
       else if (/điền đủ 5\/5|AUTO A→Z hoàn tất/i.test(message)) status = "review";
-      else if (/chọn .*sản phẩm|Select Products/i.test(message)) status = "selecting-products";
       else if (/listing/i.test(message)) status = "filling-listing";
       else if (/artwork|PNG/i.test(message)) status = "uploading-artwork";
       update.autoRun = { ...autoRun, status, lastMessage: message, updatedAt: Date.now() };
@@ -574,32 +568,6 @@
     element.dispatchEvent(new Evt("blur", { bubbles: true, composed: true }));
   }
 
-  function findSelectProductsButton() {
-    return queryAllDeep("button, [role='button'], a").find((element) => {
-      if (!isVisible(element) || element.disabled || element.getAttribute("aria-disabled") === "true") return false;
-      const text = `${element.innerText || element.textContent || ""} ${element.getAttribute("aria-label") || ""}`.replace(/\s+/g, " ").trim();
-      return /^select products?$/i.test(text) || /select products?/i.test(text);
-    }) || null;
-  }
-
-  function highlightSelectProducts() {
-    const button = findSelectProductsButton();
-    if (!button) return false;
-    button.dataset.merchFlowHighlight = "true";
-    button.style.outline = "3px solid #9de25a";
-    button.style.outlineOffset = "3px";
-    button.style.borderRadius = "6px";
-    button.scrollIntoView({ block: "center", behavior: "smooth" });
-    setTimeout(() => {
-      if (button.dataset.merchFlowHighlight === "true") {
-        button.style.outline = "";
-        button.style.outlineOffset = "";
-        delete button.dataset.merchFlowHighlight;
-      }
-    }, 12000);
-    return true;
-  }
-
   function findReviewPublishControl() {
     const candidates = queryAllDeep("button, [role='button'], input[type='submit'], a")
       .filter((element) => isVisible(element) && !element.disabled && element.getAttribute("aria-disabled") !== "true")
@@ -643,23 +611,6 @@
     return liveArtworkPresent();
   }
 
-  async function ensureReviewPublishControl(uploadId) {
-    let review = findReviewPublishControl();
-    if (review) return review;
-    const save = findSavePublishSettingsControl();
-    if (!save) return null;
-    await setMerchStatus("Đã đủ artwork, sản phẩm và listing; đang lưu Publish settings trước khi bàn giao…", "info", uploadId);
-    save.click();
-    const startedAt = Date.now();
-    while (Date.now() - startedAt < 12000) {
-      if (uploadError(findArtworkTarget()?.container || document.body)) return null;
-      review = findReviewPublishControl();
-      if (review) return review;
-      await sleep(300);
-    }
-    return null;
-  }
-
   function highlightReviewPublishControl() {
     const control = findReviewPublishControl();
     if (!control) return false;
@@ -679,285 +630,6 @@
     return true;
   }
 
-
-  function findProductDialog() {
-    const direct = queryAllDeep("[role='dialog'], dialog, [aria-modal='true']").find((element) => {
-      if (!isVisible(element)) return false;
-      const text = compactText(element.innerText || element.textContent, 4000);
-      return /select products?/i.test(text) && element.querySelector?.("input[type='checkbox'], [role='checkbox']");
-    });
-    if (direct) return direct;
-
-    const heading = queryAllDeep("h1, h2, h3, [role='heading']").find((element) => {
-      if (!isVisible(element)) return false;
-      return /^select products?$/i.test(compactText(element.innerText || element.textContent, 200));
-    });
-    if (!heading) return null;
-    let current = heading.parentElement;
-    for (let depth = 0; current && depth < 8; depth += 1, current = current.parentElement) {
-      if (current.querySelectorAll?.("input[type='checkbox'], [role='checkbox']").length >= 5) return current;
-    }
-    return null;
-  }
-
-  async function waitForProductDialog(timeoutMs = 10000) {
-    const startedAt = Date.now();
-    while (Date.now() - startedAt < timeoutMs) {
-      const dialog = findProductDialog();
-      if (dialog) return dialog;
-      await sleep(250);
-    }
-    return null;
-  }
-
-  function checkboxState(checkbox) {
-    if (!checkbox) return false;
-    if (typeof checkbox.checked === "boolean") return checkbox.checked;
-    return checkbox.getAttribute("aria-checked") === "true";
-  }
-
-  async function setCheckboxState(checkbox, desired) {
-    if (!checkbox || checkbox.disabled || checkbox.getAttribute("aria-disabled") === "true") return false;
-    if (checkboxState(checkbox) === desired) return true;
-    checkbox.scrollIntoView?.({ block: "nearest" });
-    if (checkbox instanceof HTMLInputElement) {
-      // Amazon's current Angular Select Products grid cancels HTMLElement.click()
-      // and its synchronous handler is very slow. Use the native property/events
-      // first; click remains a fallback for other Amazon UI variants.
-      const view = checkbox.ownerDocument?.defaultView || window;
-      const Input = view.HTMLInputElement || HTMLInputElement;
-      Object.getOwnPropertyDescriptor(Input.prototype, "checked")?.set?.call(checkbox, desired);
-      const Evt = view.Event || Event;
-      checkbox.dispatchEvent(new Evt("input", { bubbles: true, composed: true }));
-      checkbox.dispatchEvent(new Evt("change", { bubbles: true, composed: true }));
-      await sleep(120);
-      if (checkboxState(checkbox) === desired) return true;
-    }
-    checkbox.click();
-    await sleep(90);
-    if (checkboxState(checkbox) === desired) return true;
-    const label = findLabelFor(checkbox) || checkbox.closest?.("label");
-    if (label && label !== checkbox) {
-      label.click();
-      await sleep(90);
-    }
-    return checkboxState(checkbox) === desired;
-  }
-
-  function checkboxControls(root) {
-    if (!root) return [];
-    const nativeInputs = [...root.querySelectorAll("input[type='checkbox']")];
-    if (nativeInputs.length) return nativeInputs;
-    return [...root.querySelectorAll("[role='checkbox']")];
-  }
-
-  function productTableModel(dialog) {
-    const tables = [...dialog.querySelectorAll("table")];
-    for (const table of tables) {
-      const rows = [...table.querySelectorAll("tr")];
-      let marketplaceIndex = -1;
-      for (const row of rows) {
-        const cells = [...row.querySelectorAll(":scope > th, :scope > td")];
-        const index = cells.findIndex((cell) => compactText(cell.innerText || cell.textContent, 100).toLowerCase() === PRODUCT_MARKETPLACE);
-        if (index >= 0) {
-          marketplaceIndex = index;
-          break;
-        }
-      }
-      if (marketplaceIndex < 1) continue;
-
-      const products = [];
-      const allLeafCheckboxes = [];
-      for (const row of rows) {
-        const cells = [...row.querySelectorAll(":scope > th, :scope > td")];
-        if (cells.length <= marketplaceIndex) continue;
-        const name = compactText(cells[0]?.innerText || cells[0]?.textContent, 240);
-        if (!name || /^all products$/i.test(name) || /select\s+all/i.test(name)) continue;
-        const rowCheckboxes = cells.slice(1).flatMap((cell) => checkboxControls(cell));
-        allLeafCheckboxes.push(...rowCheckboxes);
-        const marketplaceCell = cells[marketplaceIndex];
-        const checkbox = checkboxControls(marketplaceCell)[0] || null;
-        products.push({
-          name,
-          checkbox,
-          row,
-          available: Boolean(checkbox && !checkbox.disabled && checkbox.getAttribute("aria-disabled") !== "true")
-        });
-      }
-      if (products.length) return { table, products, allLeafCheckboxes: [...new Set(allLeafCheckboxes)] };
-    }
-    return { table: null, products: [], allLeafCheckboxes: [] };
-  }
-
-  function findNoneControl(dialog) {
-    return [...dialog.querySelectorAll("button, a, [role='button']")].find((element) => {
-      if (!isVisible(element)) return false;
-      return /^none$/i.test(compactText(element.innerText || element.textContent, 80));
-    }) || null;
-  }
-
-  function findProductDialogAction(dialog) {
-    const candidates = [...dialog.querySelectorAll("button, [role='button'], input[type='button'], input[type='submit']")]
-      .filter((element) => isVisible(element) && !element.disabled && element.getAttribute("aria-disabled") !== "true")
-      .map((element) => ({
-        element,
-        text: compactText(`${element.innerText || element.textContent || ""} ${element.value || ""} ${element.getAttribute("aria-label") || ""}`, 200).toLowerCase()
-      }));
-    const preferred = [
-      /save selections?/, /save products?/, /^save$/, /^apply$/, /^done$/, /^confirm$/, /^continue$/, /select products?/
-    ];
-    for (const pattern of preferred) {
-      const match = candidates.find((candidate) => pattern.test(candidate.text) && !/close|cancel|none|all/.test(candidate.text));
-      if (match) return match.element;
-    }
-    return null;
-  }
-
-  async function waitForProductDialogAction(dialog, timeoutMs = 7000) {
-    const startedAt = Date.now();
-    while (Date.now() - startedAt < timeoutMs) {
-      const liveDialog = findProductDialog() || dialog;
-      const action = liveDialog ? findProductDialogAction(liveDialog) : null;
-      if (action) return { action, dialog: liveDialog };
-      await sleep(200);
-    }
-    return { action: null, dialog: findProductDialog() || dialog };
-  }
-
-  function findDialogClose(dialog) {
-    return [...dialog.querySelectorAll("button, [role='button']")].find((element) => {
-      if (!isVisible(element)) return false;
-      const text = compactText(`${element.innerText || element.textContent || ""} ${element.getAttribute("aria-label") || ""} ${element.getAttribute("title") || ""}`, 120).toLowerCase();
-      return /^(x|×)$/.test(text) || /close|dismiss/.test(text);
-    }) || null;
-  }
-
-  async function autoSelectTenProducts(pendingUpload) {
-    if (productSelectionBusy) return { attempted: true, completed: false, busy: true };
-    if (pendingUpload?.productsSelectedAt
-      && pendingUpload.selectedProductCount === PRODUCT_LIMIT
-      && pendingUpload.productSelectionPolicy === PRODUCT_SELECTION_POLICY) {
-      return { attempted: false, completed: true, count: PRODUCT_LIMIT, primary: pendingUpload.selectedPrimaryProduct || "", alreadyDone: true };
-    }
-
-    const previousFailures = Math.max(0, Number(pendingUpload?.productSelectionFailures || 0));
-    if (previousFailures >= PRODUCT_SELECTION_MAX_FAILURES) {
-      return { attempted: false, completed: false, blocked: true, error: pendingUpload.productSelectionError || "Select Products đã lỗi nhiều lần" };
-    }
-
-    let dialog = findProductDialog();
-    const selectButton = findSelectProductsButton();
-    if (!dialog && !selectButton) return { attempted: false, completed: false };
-
-    productSelectionBusy = true;
-    try {
-      await updateUpload(pendingUpload.uploadId, { status: "selecting-products", lastError: "" });
-      await setMerchStatus(`Đang phân tích niche/listing và chọn ${PRODUCT_LIMIT} sản phẩm phù hợp ở ${PRODUCT_MARKETPLACE}…`, "info", pendingUpload.uploadId);
-      if (!dialog) {
-        selectButton.scrollIntoView?.({ block: "center" });
-        selectButton.click();
-        dialog = await waitForProductDialog(12000);
-      }
-      if (!dialog) throw new Error("Không mở được hộp Select Products; có thể nút còn bị Amazon khóa trong lúc xử lý artwork");
-
-      let model = productTableModel(dialog);
-      if (!model.products.length) throw new Error("Không đọc được bảng sản phẩm Amazon");
-      let plan = Core.chooseProductPlan(model.products, PRODUCT_LIMIT, pendingUpload.productContext || { listing: pendingUpload.listing });
-      const targets = plan.products;
-      if (targets.length < PRODUCT_LIMIT) throw new Error(`Chỉ tìm thấy ${targets.length}/${PRODUCT_LIMIT} sản phẩm phù hợp và khả dụng ở ${PRODUCT_MARKETPLACE}`);
-
-      const none = findNoneControl(dialog);
-      if (none) {
-        none.click();
-        await sleep(700);
-      }
-
-      dialog = findProductDialog() || dialog;
-      model = productTableModel(dialog);
-      for (const checkbox of model.allLeafCheckboxes) {
-        if (checkboxState(checkbox)) await setCheckboxState(checkbox, false);
-      }
-
-      dialog = findProductDialog() || dialog;
-      model = productTableModel(dialog);
-      plan = Core.chooseProductPlan(model.products, PRODUCT_LIMIT, pendingUpload.productContext || { listing: pendingUpload.listing });
-      const targetNames = plan.products.map((product) => product.name);
-      const primaryName = plan.primary?.name || targetNames[0] || "";
-      for (const productName of targetNames) {
-        dialog = findProductDialog() || dialog;
-        model = productTableModel(dialog);
-        const product = model.products.find((candidate) => candidate.name === productName);
-        if (!product || !await setCheckboxState(product.checkbox, true)) throw new Error(`Không chọn được ${productName}`);
-        await sleep(80);
-        dialog = findProductDialog() || dialog;
-        const verifyModel = productTableModel(dialog);
-        const verifyProduct = verifyModel.products.find((candidate) => candidate.name === productName);
-        if (!verifyProduct || !checkboxState(verifyProduct.checkbox)) throw new Error(`Amazon không giữ lựa chọn ${productName}`);
-      }
-
-      dialog = findProductDialog() || dialog;
-      model = productTableModel(dialog);
-      const selectedCount = model.products.filter((product) => checkboxState(product.checkbox)).length;
-      if (selectedCount !== PRODUCT_LIMIT) throw new Error(`Amazon đang chọn ${selectedCount} sản phẩm ở ${PRODUCT_MARKETPLACE} thay vì đúng ${PRODUCT_LIMIT}`);
-
-      const ready = await waitForProductDialogAction(dialog, 8000);
-      dialog = ready.dialog || dialog;
-      const action = ready.action;
-      if (!action) throw new Error("Không thấy nút Save/Apply/Done đang khả dụng trong Select Products");
-      action.scrollIntoView?.({ block: "nearest" });
-      action.click();
-      let closeStartedAt = Date.now();
-      while (Date.now() - closeStartedAt < 10000 && findProductDialog()) await sleep(250);
-      if (findProductDialog()) {
-        const retryAction = findProductDialogAction(findProductDialog());
-        if (retryAction) {
-          retryAction.click();
-          closeStartedAt = Date.now();
-          while (Date.now() - closeStartedAt < 5000 && findProductDialog()) await sleep(250);
-        }
-      }
-      if (findProductDialog()) throw new Error("Hộp Select Products chưa đóng sau khi lưu; Amazon có thể đang báo lỗi hoặc đổi giao diện");
-
-      await updateUpload(pendingUpload.uploadId, {
-        status: "waiting-listing",
-        productsSelectedAt: Date.now(),
-        selectedProductCount: PRODUCT_LIMIT,
-        selectedMarketplace: PRODUCT_MARKETPLACE,
-        selectedProductNames: targetNames,
-        selectedPrimaryProduct: primaryName,
-        selectedContextFlags: plan.contextFlags || [],
-        productSelectionPolicy: PRODUCT_SELECTION_POLICY,
-        productSelectionFailures: 0,
-        productSelectionError: "",
-        reviewWaitStartedAt: 0,
-        lastError: ""
-      });
-      const contextText = plan.contextFlags?.length ? ` Nhóm phù hợp: ${plan.contextFlags.join(", ")}.` : "";
-      await setMerchStatus(`Đã chọn ${PRODUCT_LIMIT} sản phẩm ${PRODUCT_MARKETPLACE}. Chủ đạo: ${primaryName}.${contextText} Đang chờ form listing để điền 5/5 trường…`, "success", pendingUpload.uploadId);
-      toast(`Merch Flow: đã chọn ${PRODUCT_LIMIT} sản phẩm. Chủ đạo: ${primaryName}.`, "success");
-      return { attempted: true, completed: true, count: PRODUCT_LIMIT, primary: primaryName, products: targetNames, contextFlags: plan.contextFlags || [] };
-    } catch (error) {
-      const failures = previousFailures + 1;
-      const blocked = failures >= PRODUCT_SELECTION_MAX_FAILURES;
-      const message = error.message || "Không chọn được sản phẩm";
-      await updateUpload(pendingUpload.uploadId, {
-        status: blocked ? "failed" : "waiting-listing",
-        productSelectionFailures: failures,
-        productSelectionError: message,
-        lastError: blocked ? message : ""
-      });
-      await setMerchStatus(
-        blocked
-          ? `Select Products lỗi ${failures} lần liên tiếp: ${message}. Extension đã dừng retry để không treo vô hạn; reload tab Amazon rồi bấm Điền artwork + listing để thử lại.`
-          : `Chưa tự chọn đủ ${PRODUCT_LIMIT} sản phẩm: ${message}. Đang thử lại (${failures}/${PRODUCT_SELECTION_MAX_FAILURES})…`,
-        "error",
-        pendingUpload.uploadId
-      );
-      return { attempted: true, completed: false, blocked, error: message, failures };
-    } finally {
-      productSelectionBusy = false;
-    }
-  }
 
   function fillListingOnce(listing) {
     if (!listing) return { filled: [], missing: Core.LISTING_KEYS };
@@ -1022,7 +694,7 @@
       // a visible listing form from being mistaken for proof that the new PNG was accepted.
       if (pendingUpload.artworkVerified !== true) {
         stopListingWatcher();
-        await setMerchStatus("Amazon chưa xác nhận artwork mới. Chưa điền listing/chọn sản phẩm để tránh báo thành công giả.", "error", pendingUpload.uploadId);
+        await setMerchStatus("Amazon chưa xác nhận artwork mới. Chưa điền listing để tránh báo thành công giả.", "error", pendingUpload.uploadId);
         return { completed: false, blocked: true, reason: "artwork-unverified", report: { filled: [], missing: Core.LISTING_KEYS } };
       }
       if (Date.now() - pendingUpload.createdAt > UPLOAD_TTL_MS) {
