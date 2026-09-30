@@ -1,4 +1,5 @@
 const Core = globalThis.MerchFlowCore;
+const VaultDB = globalThis.MerchFlowVaultDB;
 const DEFAULT_BOOK_PROFILE = Core.DEFAULT_BOOK_LOVER_PROFILE;
 const TARGETS = {
   tshirt: { label: "T-shirt / Premium", width: 4500, height: 5400 },
@@ -1066,17 +1067,6 @@ async function saveNicheProfile() {
   } });
 }
 
-async function openOrReuseManagedChat(jobId, { activate = true, preferredId = 0 } = {}) {
-  const result = await chrome.runtime.sendMessage({
-    type: "MERCH_FLOW_OPEN_CHAT_V1",
-    jobId,
-    activate,
-    preferredId: Number(preferredId || 0)
-  });
-  if (!result?.opened || !result.tabId) throw new Error(result?.error || "Không mở được ChatGPT");
-  return { id: result.tabId, url: result.url || "" };
-}
-
 async function sendToChatGPT({ forceNew = false, autoRun = false } = {}) {
   const activeBatch = (await chrome.storage.local.get("batchRun")).batchRun;
   if (activeBatch && ["running", "paused", "failed"].includes(activeBatch.status)) {
@@ -1620,6 +1610,7 @@ async function saveCurrentDesignToVault() {
       await chrome.storage.local.set({ lastListing: listing });
     }
     const { nicheProfile, savedDesigns } = await chrome.storage.local.get(["nicheProfile", "savedDesigns"]);
+    const savedMetadata = await ensureVaultMetadata(savedDesigns);
     const design = Core.normalizeSavedDesign({
       id: `manual:${jobId}`,
       jobId,
@@ -1634,9 +1625,9 @@ async function saveCurrentDesignToVault() {
       source: state.finalArtwork.source === "chatgpt" ? "chatgpt-final" : "manual-final"
     });
     if (!design) throw new Error("Artwork hoặc listing cuối chưa hợp lệ");
-    const current = Array.isArray(savedDesigns) ? savedDesigns : [];
-    const next = current.filter((item) => item.jobId !== jobId);
-    next.push(design);
+    await VaultDB.putDesign(design);
+    const next = savedMetadata.filter((item) => item.jobId !== jobId);
+    next.push(VaultDB.metadataFromDesign(design));
     await chrome.storage.local.set({ savedDesigns: next });
     await renderVaultUI();
     setStatus("image-status", "Đã lưu ảnh + JSON cuối vào Kho mẫu. Job này đã đủ dữ liệu để dùng lại hoặc export.", "success");
@@ -1668,9 +1659,18 @@ function savedPackage(design) {
   };
 }
 
+async function ensureVaultMetadata(savedDesigns) {
+  if (!VaultDB) throw new Error("Vault IndexedDB chưa sẵn sàng");
+  const migrated = await VaultDB.migrateLegacy(Array.isArray(savedDesigns) ? savedDesigns : []);
+  if (migrated.changed) await chrome.storage.local.set({ savedDesigns: migrated.metadata });
+  return migrated.metadata;
+}
+
 async function getSavedDesigns() {
   const { savedDesigns } = await chrome.storage.local.get("savedDesigns");
-  return (Array.isArray(savedDesigns) ? savedDesigns : [])
+  await ensureVaultMetadata(savedDesigns);
+  const designs = await VaultDB.getAllDesigns();
+  return (Array.isArray(designs) ? designs : [])
     .map((design) => Core.normalizeSavedDesign(design))
     .filter(Boolean)
     .sort((left, right) => Number(right.createdAt || 0) - Number(left.createdAt || 0));
@@ -1760,9 +1760,13 @@ async function importSavedPackage(file) {
     const candidates = parsed?.merch_flow_package ? [parsed.design] : Array.isArray(parsed?.designs) ? parsed.designs : [parsed.design || parsed];
     const imported = candidates.map((item) => Core.normalizeSavedDesign(item)).filter(Boolean);
     if (!imported.length) throw new Error("File không chứa gói Merch Flow hợp lệ");
-    const current = await getSavedDesigns();
-    const byJob = new Map(current.map((design) => [design.jobId, design]));
-    for (const design of imported) byJob.set(design.jobId, design);
+    const { savedDesigns } = await chrome.storage.local.get("savedDesigns");
+    const metadata = await ensureVaultMetadata(savedDesigns);
+    const byJob = new Map(metadata.map((design) => [design.jobId, design]));
+    for (const design of imported) {
+      await VaultDB.putDesign(design);
+      byJob.set(design.jobId, VaultDB.metadataFromDesign(design));
+    }
     await chrome.storage.local.set({ savedDesigns: [...byJob.values()] });
     setStatus("batch-status", `Đã nhập ${imported.length} mẫu vào Kho mẫu.`, "success");
     await renderVaultUI();
@@ -1778,12 +1782,16 @@ async function deleteSavedDesign(id) {
   const design = designs.find((item) => item.id === id);
   const label = design?.listing?.title ? `“${design.listing.title}”` : "mẫu này";
   if (!confirm(`Xoá ${label} khỏi Kho mẫu?`)) return;
-  await chrome.storage.local.set({ savedDesigns: designs.filter((item) => item.id !== id) });
+  await VaultDB.deleteDesign(id);
+  const { savedDesigns } = await chrome.storage.local.get("savedDesigns");
+  const metadata = await ensureVaultMetadata(savedDesigns);
+  await chrome.storage.local.set({ savedDesigns: metadata.filter((item) => item.id !== id) });
   await renderVaultUI();
 }
 
 async function clearSavedDesigns() {
   if (!confirm("Xoá toàn bộ artwork và listing trong Kho mẫu?")) return;
+  await VaultDB.clearDesigns();
   await chrome.storage.local.remove("savedDesigns");
   setStatus("batch-status", "Đã xoá toàn bộ Kho mẫu.", "success");
   await renderVaultUI();
@@ -1991,7 +1999,8 @@ async function cleanExpiredData() {
 async function hydrate() {
   await cleanExpiredData();
   const { nicheProfile, lastListing, finalListing, processedArtwork, finalArtwork, chatArtwork, chatStatus, merchStatus, pendingChatJob, batchRun, savedDesigns } = await chrome.storage.local.get(["nicheProfile", "lastListing", "finalListing", "processedArtwork", "finalArtwork", "chatArtwork", "chatStatus", "merchStatus", "pendingChatJob", "batchRun", "savedDesigns"]);
-  state.creativeMemory = Core.creativeMemoryFromSavedDesigns(savedDesigns || []);
+  const savedMetadata = await ensureVaultMetadata(savedDesigns || []);
+  state.creativeMemory = Core.creativeMemoryFromSavedDesigns(savedMetadata);
   const shouldMigrateBookProfile = nicheProfile?.name?.trim() === DEFAULT_BOOK_PROFILE.name
     && nicheProfile?.profileVersion !== DEFAULT_BOOK_PROFILE.profileVersion;
   const resolvedProfile = shouldMigrateBookProfile
