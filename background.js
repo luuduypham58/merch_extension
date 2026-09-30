@@ -1,11 +1,11 @@
-importScripts("merch-flow-core.js");
+importScripts("merch-flow-core.js", "vault-db.js");
 
 const Core = globalThis.MerchFlowCore;
+const VaultDB = globalThis.MerchFlowVaultDB;
 const BATCH_MAX = 25;
 const BATCH_JOB_TTL = 30 * 60 * 1000;
 const AMAZON_RUNTIME_STORAGE_KEY = "merchFlowAmazonRuntimes";
 let batchBusy = false;
-let managedChatOpenChain = Promise.resolve();
 const freshRouteRepairBusy = new Set();
 
 async function registerMerchAmazonRuntime(tabId, message) {
@@ -201,67 +201,6 @@ function freshJobUrl(job, repairCount = 0) {
   return "https://chatgpt.com/";
 }
 
-async function findManagedChatCandidate(jobId = "", preferredId = 0) {
-  const data = await chrome.storage.local.get([
-    "merchFlowChatTabId", "pendingChatJob", "lastSentChatJob", "batchRun"
-  ]);
-  const ids = [
-    preferredId,
-    data.merchFlowChatTabId,
-    data.pendingChatJob?.chatTabId,
-    data.lastSentChatJob?.chatTabId,
-    data.batchRun?.chatTabId
-  ].map(Number).filter(Boolean);
-
-  for (const tabId of [...new Set(ids)]) {
-    const tab = await getChatTab(tabId);
-    if (tab) return tab;
-  }
-
-  const tabs = (await chrome.tabs.query({})).filter((tab) => isChatUrl(tab.url || ""));
-  if (!tabs.length) return null;
-
-  const exactJobTab = tabs.find((tab) => {
-    try { return new URL(tab.url).searchParams.get("merch_flow_job") === jobId; }
-    catch (_) { return false; }
-  });
-  if (exactJobTab) return exactJobTab;
-
-  const conversationKey = data.lastSentChatJob?.conversationKey || "";
-  if (conversationKey && conversationKey.startsWith("/c/")) {
-    const conversationTab = tabs.find((tab) => {
-      try { return new URL(tab.url).pathname === conversationKey; }
-      catch (_) { return false; }
-    });
-    if (conversationTab) return conversationTab;
-  }
-
-  // Recover old extension-created conversations without hijacking a random personal ChatGPT tab.
-  return tabs.find((tab) => /Merch (Flow|Design|Listing)/i.test(tab.title || "")) || null;
-}
-
-async function ensureManagedChatTab(jobId, { activate = true, preferredId = 0 } = {}) {
-  const task = async () => {
-    if (!jobId) throw new Error("Thiếu Job ID khi mở ChatGPT");
-    const url = `https://chatgpt.com/?merch_flow_job=${encodeURIComponent(jobId)}`;
-    let tab = await findManagedChatCandidate(jobId, preferredId);
-    if (tab) {
-      const update = { url };
-      if (activate) update.active = true;
-      tab = await chrome.tabs.update(tab.id, update);
-    } else {
-      tab = await chrome.tabs.create({ url, active: activate });
-    }
-    await chrome.storage.local.set({ merchFlowChatTabId: tab.id });
-    return tab;
-  };
-
-  // One serialized creation path prevents popup + batch from racing into two ChatGPT tabs.
-  const run = managedChatOpenChain.then(task, task);
-  managedChatOpenChain = run.catch(() => {});
-  return run;
-}
-
 async function findPreparedImageComposerTab(openChatTabs = []) {
   for (const tab of openChatTabs) {
     if (!tab?.id || !/^https:\/\/chatgpt\.com\/?(?:[?#].*)?$/i.test(tab.url || "")) continue;
@@ -357,16 +296,18 @@ async function startFreshChatJob(job, { activate = true, closePreviousManaged = 
   return { opened: true, tabId: tab.id, url: tab.url || url, sessionNonce };
 }
 
-async function openBatchChat(run, jobId) {
-  // Reuse exactly one Merch Flow ChatGPT tab for the whole batch.
-  return ensureManagedChatTab(jobId, { activate: true, preferredId: run.chatTabId || 0 });
-}
-
 async function clearTransientFlowData() {
   await chrome.storage.local.remove([
     "pendingChatJob", "lastSentChatJob", "chatArtwork", "lastListing",
     "processedArtwork", "pendingUpload", "lastAutoUpload", "merchStatus", "autoRun"
   ]);
+}
+
+async function ensureVaultMetadata(savedDesigns) {
+  if (!VaultDB) throw new Error("Vault IndexedDB chưa sẵn sàng");
+  const migrated = await VaultDB.migrateLegacy(Array.isArray(savedDesigns) ? savedDesigns : []);
+  if (migrated.changed) await chrome.storage.local.set({ savedDesigns: migrated.metadata });
+  return migrated.metadata;
 }
 
 async function startNextBatchJob() {
@@ -397,7 +338,7 @@ async function startNextBatchJob() {
     }
 
     const profile = run.profileSnapshot || data.nicheProfile || Core.DEFAULT_BOOK_LOVER_PROFILE;
-    const allSavedDesigns = Array.isArray(data.savedDesigns) ? data.savedDesigns : [];
+    const allSavedDesigns = await ensureVaultMetadata(data.savedDesigns);
     const batchDesigns = allSavedDesigns
       .filter((design) => design.batchId === run.id)
       .sort((a, b) => Number(a.batchIndex || 0) - Number(b.batchIndex || 0));
@@ -482,7 +423,7 @@ async function finalizeCurrentBatchDesign() {
     const listingIndex = Number.isFinite(listing.messageIndex) ? listing.messageIndex : -1;
     if (artworkIndex >= 0 && listingIndex >= 0 && listingIndex < artworkIndex) return;
 
-    const savedDesigns = Array.isArray(data.savedDesigns) ? data.savedDesigns : [];
+    const savedDesigns = await ensureVaultMetadata(data.savedDesigns);
     if (savedDesigns.some((design) => design.jobId === jobId)) {
       await chrome.storage.local.set({ batchRun: { ...run, currentJobId: "", completedCount: Math.max(Number(run.completedCount || 0), Number(run.currentIndex || 0)), updatedAt: Date.now() } });
       return;
@@ -508,7 +449,8 @@ async function finalizeCurrentBatchDesign() {
       source: "batch-vault"
     });
     if (!design) throw new Error("Artwork hoặc listing batch không hợp lệ");
-    const nextSaved = [...savedDesigns, design];
+    await VaultDB.putDesign(design);
+    const nextSaved = [...savedDesigns.filter((item) => item.jobId !== jobId), VaultDB.metadataFromDesign(design)];
     const completedCount = Number(run.completedCount || 0) + 1;
     const done = completedCount >= clampBatchCount(run.targetCount);
     const paused = run.status === "paused";
@@ -602,27 +544,33 @@ async function resumeBatch() {
   await chrome.storage.local.set({ batchRun: next });
   await chrome.alarms.create("merch-flow-batch-watch", { periodInMinutes: 1 });
   await finalizeCurrentBatchDesign();
+
   const latest = await chrome.storage.local.get(["batchRun", "pendingChatJob"]);
   if (!latest.batchRun?.currentJobId) {
     await startNextBatchJob();
-  } else {
-    const pending = latest.pendingChatJob;
-    if (pending?.jobId === latest.batchRun.currentJobId && pending.status === "failed") {
-      await chrome.storage.local.set({ pendingChatJob: { ...pending, status: "pending", lastError: "", lastAttemptAt: Date.now() } });
-      const tab = await ensureManagedChatTab(pending.jobId, { activate: true, preferredId: latest.batchRun.chatTabId || pending.chatTabId || 0 });
-      await chrome.storage.local.set({ batchRun: { ...latest.batchRun, chatTabId: tab.id, jobStartedAt: Date.now(), lastMessage: "Đang gửi lại mẫu batch bị lỗi…", updatedAt: Date.now() } });
-    } else if (wasFailed && !pending) {
-      await chrome.storage.local.set({ batchRun: { ...latest.batchRun, currentJobId: "", currentIndex: 0, jobStartedAt: 0, lastMessage: "Job cũ không còn dữ liệu để tiếp tục; đang tạo lại đúng vị trí batch…", updatedAt: Date.now() } });
-      await startNextBatchJob();
+    return { resumed: true };
+  }
+
+  const pending = latest.pendingChatJob;
+  if (pending?.jobId === latest.batchRun.currentJobId) {
+    const existing = await getChatTab(Number(pending.chatTabId || latest.batchRun.chatTabId || 0));
+    if (pending.status === "failed" || !existing) {
+      const retryJob = { ...pending, status: "pending", lastError: "", lastAttemptAt: Date.now(), sourcePrompt: pending.sourcePrompt || pending.prompt, sessionNonce: crypto.randomUUID() };
+      const fresh = await startFreshChatJob(retryJob, { activate: true, closePreviousManaged: true });
+      const stored = await chrome.storage.local.get("pendingChatJob");
+      await chrome.storage.local.set({
+        pendingChatJob: stored.pendingChatJob?.jobId === retryJob.jobId ? { ...stored.pendingChatJob, chatTabId: fresh.tabId, chatUrl: fresh.url || "", lastAttemptAt: Date.now() } : stored.pendingChatJob,
+        batchRun: { ...latest.batchRun, chatTabId: fresh.tabId, jobStartedAt: Date.now(), lastMessage: "Đã mở New chat sạch để tiếp tục mẫu batch đang dở…", updatedAt: Date.now() }
+      });
     } else {
-      const tab = await findManagedChatCandidate(latest.batchRun.currentJobId, latest.batchRun.chatTabId || pending?.chatTabId || 0);
-      if (!tab && pending?.jobId === latest.batchRun.currentJobId) {
-        const reopened = await ensureManagedChatTab(pending.jobId, { activate: true, preferredId: pending.chatTabId || 0 });
-        await chrome.storage.local.set({ batchRun: { ...latest.batchRun, chatTabId: reopened.id, jobStartedAt: Date.now(), lastMessage: "Đã mở lại tab ChatGPT duy nhất cho job đang dở…", updatedAt: Date.now() } });
-      } else if (!tab && !pending) {
-        await chrome.storage.local.set({ batchRun: { ...latest.batchRun, status: "failed", lastError: "Không tìm thấy tab/conversation của job đang dở", lastMessage: "Không tự tạo tab ChatGPT mới cho job cũ. Bấm Tiếp tục lần nữa để tạo lại vị trí batch nếu cần.", updatedAt: Date.now() } });
-      }
+      await chrome.tabs.update(existing.id, { active: true });
+      await chrome.storage.local.set({ batchRun: { ...latest.batchRun, chatTabId: existing.id, lastMessage: "Đã đưa tab ChatGPT thuộc đúng job ra trước; đang tiếp tục theo state hiện tại…", updatedAt: Date.now() } });
     }
+  } else if (wasFailed && !pending) {
+    await chrome.storage.local.set({ batchRun: { ...latest.batchRun, currentJobId: "", currentIndex: 0, jobStartedAt: 0, lastMessage: "Job cũ không còn dữ liệu để tiếp tục; đang tạo lại đúng vị trí batch…", updatedAt: Date.now() } });
+    await startNextBatchJob();
+  } else {
+    await chrome.storage.local.set({ batchRun: { ...latest.batchRun, status: "failed", lastError: "Không còn state ChatGPT khớp job batch", lastMessage: "Không tìm thấy state/tab thuộc đúng Job ID. Batch đã dừng an toàn để tránh chiếm nhầm chat cá nhân.", updatedAt: Date.now() } });
   }
   return { resumed: true };
 }
@@ -657,18 +605,20 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
-  chrome.storage.local.get("batchRun").then(({ batchRun }) => {
-    if (!batchRun || batchRun.chatTabId !== tabId || !["running", "paused"].includes(batchRun.status)) return;
-    chrome.storage.local.set({
-      batchRun: {
-        ...batchRun,
-        status: "failed",
-        lastError: "Tab ChatGPT batch đã bị đóng",
-        lastMessage: "Tab ChatGPT dùng cho batch đã bị đóng. Bấm Tiếp tục để chạy lại mẫu hiện tại.",
-        updatedAt: Date.now()
-      }
-    });
-  });
+  chrome.storage.local.get(["batchRun", "merchFlowChatTabId", AMAZON_RUNTIME_STORAGE_KEY]).then((data) => {
+    const update = {};
+    if (Number(data.merchFlowChatTabId || 0) === Number(tabId)) update.merchFlowChatTabId = 0;
+    const runtimes = data[AMAZON_RUNTIME_STORAGE_KEY] && typeof data[AMAZON_RUNTIME_STORAGE_KEY] === "object" ? { ...data[AMAZON_RUNTIME_STORAGE_KEY] } : {};
+    if (runtimes[String(tabId)]) {
+      delete runtimes[String(tabId)];
+      update[AMAZON_RUNTIME_STORAGE_KEY] = runtimes;
+    }
+    const batchRun = data.batchRun;
+    if (batchRun && Number(batchRun.chatTabId || 0) === Number(tabId) && ["running", "paused"].includes(batchRun.status)) {
+      update.batchRun = { ...batchRun, status: "failed", lastError: "Tab ChatGPT batch đã bị đóng", lastMessage: "Tab ChatGPT dùng cho batch đã bị đóng. Bấm Tiếp tục để chạy lại mẫu hiện tại trong New chat sạch.", updatedAt: Date.now() };
+    }
+    if (Object.keys(update).length) chrome.storage.local.set(update);
+  }).catch(() => {});
 });
 
 async function guardFreshConversationRoute(tabId, changedUrl) {
@@ -784,26 +734,20 @@ if (chrome.webNavigation?.onCommitted && chrome.webNavigation?.onHistoryStateUpd
 enablePinnedPanel().catch(console.error);
 chrome.runtime.onInstalled.addListener(async (details) => {
   await enablePinnedPanel().catch(console.error);
+  const vaultState = await chrome.storage.local.get("savedDesigns");
+  await ensureVaultMetadata(vaultState.savedDesigns).catch(console.error);
   if (details?.reason !== "update") return;
-  const data = await chrome.storage.local.get(["merchFlowChatTabId", "pendingChatJob", "lastSentChatJob", "batchRun"]);
-  const ids = [
-    data.merchFlowChatTabId,
-    data.pendingChatJob?.chatTabId,
-    data.lastSentChatJob?.chatTabId,
-    data.batchRun?.chatTabId
-  ].map(Number).filter(Boolean);
-  const merchTabs = await chrome.tabs.query({ url: "https://merch.amazon.com/*" }).catch(() => []);
-  const chatTabs = await chrome.tabs.query({ url: ["https://chatgpt.com/*", "https://chat.openai.com/*"] }).catch(() => []);
-  const reloadIds = new Set([
-    ...ids,
-    ...chatTabs.map((tab) => Number(tab.id || 0)).filter(Boolean),
-    ...merchTabs.map((tab) => Number(tab.id || 0)).filter(Boolean)
-  ]);
+
+  const data = await chrome.storage.local.get(["merchFlowChatTabId", "pendingChatJob", "lastSentChatJob", "batchRun", AMAZON_RUNTIME_STORAGE_KEY, "pendingUpload", "autoRun"]);
+  const managedChatIds = [data.merchFlowChatTabId, data.pendingChatJob?.chatTabId, data.lastSentChatJob?.chatTabId, data.batchRun?.chatTabId].map(Number).filter(Boolean);
+  const activeMerchJob = Boolean(data.pendingUpload?.jobId || data.autoRun?.jobId);
+  const runtimeIds = activeMerchJob ? Object.values(data[AMAZON_RUNTIME_STORAGE_KEY] || {}).map((runtime) => Number(runtime?.tabId || 0)).filter(Boolean) : [];
+  const reloadIds = new Set([...managedChatIds, ...runtimeIds]);
   await Promise.allSettled([...reloadIds].map(async (tabId) => {
     try {
       const tab = await chrome.tabs.get(tabId);
       if (isChatUrl(tab.url || "") || /^https:\/\/merch\.amazon\.com\//i.test(tab.url || "")) await chrome.tabs.reload(tabId);
-    } catch (_) { /* tab already closed */ }
+    } catch (_) { /* managed tab already closed */ }
   }));
 });
 chrome.runtime.onStartup.addListener(async () => {
@@ -856,12 +800,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     })
       .then(sendResponse)
       .catch((error) => sendResponse({ opened: false, error: error.message || "Không mở được phiên ChatGPT sạch" }));
-    return true;
-  }
-  if (message?.type === "MERCH_FLOW_OPEN_CHAT_V1") {
-    ensureManagedChatTab(message.jobId, { activate: message.activate !== false, preferredId: Number(message.preferredId || 0) })
-      .then((tab) => sendResponse({ opened: true, tabId: tab.id, url: tab.url || "" }))
-      .catch((error) => sendResponse({ opened: false, error: error.message || "Không mở được ChatGPT" }));
     return true;
   }
   if (message?.type === "MERCH_FLOW_REGISTER_CHAT_TAB_V1") {
