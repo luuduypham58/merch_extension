@@ -804,19 +804,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   if (message?.type === "MERCH_FLOW_REGISTER_CHAT_TAB_V1") {
     const tabId = sender?.tab?.id;
-    const tagged = Boolean(message.jobId);
     chrome.storage.local.get(["merchFlowChatTabId", "lastSentChatJob", "pendingChatJob", "batchRun"]).then((data) => {
       const known = [data.merchFlowChatTabId, data.lastSentChatJob?.chatTabId, data.pendingChatJob?.chatTabId, data.batchRun?.chatTabId].map(Number).filter(Boolean);
       const conversationKey = data.lastSentChatJob?.conversationKey || "";
-      const sameConversation = conversationKey && message.conversationKey === conversationKey;
-      if (tabId && isChatUrl(sender.tab?.url || "") && (tagged || known.includes(tabId) || sameConversation || /Merch (Flow|Design|Listing)/i.test(sender.tab?.title || ""))) {
+      const sameConversation = Boolean(conversationKey && message.conversationKey === conversationKey);
+      if (tabId && isChatUrl(sender.tab?.url || "") && (known.includes(Number(tabId)) || sameConversation)) {
         const matchedJob = [data.pendingChatJob, data.lastSentChatJob]
-          .find((job) => job?.jobId && (Number(job.chatTabId || 0) === Number(tabId) || (message.jobId && job.jobId === message.jobId))) || null;
+          .find((job) => job?.jobId && Number(job.chatTabId || 0) === Number(tabId))
+          || (sameConversation ? data.lastSentChatJob : null);
         return chrome.storage.local.set({ merchFlowChatTabId: tabId }).then(() => sendResponse({
           registered: true,
           tabId,
-          jobId: String(message.jobId || matchedJob?.jobId || ""),
-          sessionNonce: String(message.sessionNonce || matchedJob?.sessionNonce || "")
+          jobId: String(matchedJob?.jobId || ""),
+          sessionNonce: String(matchedJob?.sessionNonce || message.sessionNonce || "")
         }));
       }
       sendResponse({ registered: false });
