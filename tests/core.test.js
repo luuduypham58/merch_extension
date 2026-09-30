@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
+const vm = require("node:vm");
 const path = require("node:path");
 const {
   parseListingFromAssistantText,
@@ -291,15 +292,14 @@ test("initial prompt uses the shared compact behavior-first artwork brief", () =
   assert.doesNotMatch(prompt, /Propose 5 fresh concepts/);
 });
 
-test("Merch Flow routes every ChatGPT open through one serialized background manager", () => {
+test("v0.9.34 uses strict fresh-chat ownership and removes legacy opener fallbacks", () => {
   const popup = fs.readFileSync(path.join(__dirname, "..", "popup.js"), "utf8");
   const background = fs.readFileSync(path.join(__dirname, "..", "background.js"), "utf8");
-  assert.match(popup, /MERCH_FLOW_OPEN_CHAT_V1/);
-  assert.doesNotMatch(popup, /chrome\.tabs\.create\(\{ url: ["'`]https:\/\/chatgpt\.com/);
-  assert.match(background, /async function ensureManagedChatTab/);
-  assert.match(background, /managedChatOpenChain/);
-  assert.match(background, /findManagedChatCandidate/);
-  assert.match(background, /merchFlowChatTabId/);
+  assert.doesNotMatch(popup, /MERCH_FLOW_OPEN_CHAT_V1/);
+  assert.doesNotMatch(background, /ensureManagedChatTab|findManagedChatCandidate|managedChatOpenChain/);
+  assert.doesNotMatch(background, /Merch \(Flow\|Design\|Listing\)/);
+  assert.match(background, /MERCH_FLOW_START_FRESH_CHAT_V1/);
+  assert.match(background, /return "https:\/\/chatgpt\.com\/"/);
 });
 
 test("opening Chrome does not auto-start ChatGPT for a persisted batch", () => {
@@ -572,10 +572,10 @@ test("v0.9.0 fresh retry leaves a failed conversation instead of retrying inside
   assert.doesNotMatch(retryBody, /sendMarkedPrompt\(/);
 });
 
-test("v0.9.33 manifest has a stable key and synchronized version badge", () => {
+test("v0.9.34 manifest has a stable key and synchronized version badge", () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "manifest.json"), "utf8"));
   const html = fs.readFileSync(path.join(__dirname, "..", "popup.html"), "utf8");
-  assert.equal(manifest.version, "0.9.33");
+  assert.equal(manifest.version, "0.9.34");
   assert.match(manifest.name, /v0\.9\.33/);
   assert.match(manifest.description, /v0\.9\.33/);
   assert.equal(typeof manifest.key, "string");
@@ -659,10 +659,10 @@ test("v0.9.29 retries image-edit routing through a normal clean composer with no
   assert.match(background, /createImageModeBypass \? null : await findPreparedImageComposerTab/);
 });
 
-test("v0.9.33 sends every compact new-image job through the normal clean composer", () => {
+test("v0.9.34 sends every compact new-image job through the normal clean composer", () => {
   const background = fs.readFileSync(path.join(__dirname, "..", "background.js"), "utf8");
   const start = background.indexOf("async function startFreshChatJob");
-  const end = background.indexOf("async function openBatchChat", start);
+  const end = background.indexOf("async function clearTransientFlowData", start);
   const body = background.slice(start, end);
   assert.match(body, /const textOnlyNewImageJob =/);
   assert.match(body, /MERCH_FLOW_IMAGE_REQUEST:\\s\*NEW/);
@@ -693,7 +693,7 @@ test("v0.9.29 rejects legacy canvas storage before artwork or listing can advanc
   assert.match(followupBody, /!storedArtworkIsUsable\(chatArtwork, job\.jobId\)/);
   assert.match(chat, /purgeLegacyCanvasArtifacts\(\)/);
 });
-test("v0.9.33 generation uses a compact marker and ignores stored reference attachments", () => {
+test("v0.9.34 generation uses a compact marker and ignores stored reference attachments", () => {
   const noRef = buildArtworkPrompt({ jobId: JOB_ID, profile: DEFAULT_BOOK_LOVER_PROFILE });
   assert.doesNotMatch(noRef, /MERCH_FLOW_IMAGE_MODE/);
   assert.match(noRef, /MERCH_FLOW_IMAGE_REQUEST: NEW/);
@@ -706,21 +706,22 @@ test("v0.9.33 generation uses a compact marker and ignores stored reference atta
 });
 
 
-test("v0.9.10 Amazon script version matches the package and update reloads Merch tabs", () => {
+test("v0.9.34 update reloads only managed flow tabs", () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "manifest.json"), "utf8"));
   const merch = fs.readFileSync(path.join(__dirname, "..", "merch-content.js"), "utf8");
   const background = fs.readFileSync(path.join(__dirname, "..", "background.js"), "utf8");
   assert.match(merch, new RegExp(`SCRIPT_VERSION = "${manifest.version.replace(/\./g, "\\.")}"`));
-  assert.match(background, /chrome\.tabs\.query\(\{ url: "https:\/\/merch\.amazon\.com\/\*" \}\)/);
+  assert.doesNotMatch(background, /chrome\.tabs\.query\(\{ url: "https:\/\/merch\.amazon\.com\/\*" \}\)/);
+  assert.match(background, /Object\.values\(data\[AMAZON_RUNTIME_STORAGE_KEY\]/);
 });
 
-test("v0.9.5 Select Products avoids endless retry and counts marketplace products only", () => {
+test("v0.9.34 removes dormant automatic product selection and keeps manual handoff", () => {
   const merch = fs.readFileSync(path.join(__dirname, "..", "merch-content.js"), "utf8");
-  assert.match(merch, /PRODUCT_SELECTION_MAX_FAILURES = 3/);
-  assert.match(merch, /model\.products\.filter\(\(product\) => checkboxState\(product\.checkbox\)\)\.length/);
-  assert.match(merch, /status: blocked \? "failed" : "waiting-listing"/);
-  assert.match(merch, /element\.disabled \|\| element\.getAttribute\("aria-disabled"\) === "true"/);
-  assert.match(merch, /productSelectionFailures:\s*0/);
+  const html = fs.readFileSync(path.join(__dirname, "..", "popup.html"), "utf8");
+  assert.doesNotMatch(merch, /autoSelectTenProducts|PRODUCT_SELECTION_MAX_FAILURES|setCheckboxState/);
+  assert.match(merch, /manualProductSelectionRequired: true/);
+  assert.match(merch, /Anh tự chọn sản phẩm\/màu/);
+  assert.match(html, /Anh tự chọn sản phẩm\/màu phù hợp/);
 });
 
 test("v0.9.5 reference UI is explicit that saved images are local-only", () => {
@@ -748,7 +749,7 @@ test("v0.9.5 scrubs stale composer attachments before text-to-image send", () =>
   assert.match(chat, /referenceAlreadySent: false/);
 });
 
-test("v0.9.33 prompts use a neutral compact new-image marker", () => {
+test("v0.9.34 prompts use a neutral compact new-image marker", () => {
   const prompt = buildArtworkPrompt({ jobId: JOB_ID, profile: DEFAULT_BOOK_LOVER_PROFILE });
   assert.match(prompt, /MERCH_FLOW_IMAGE_REQUEST: NEW/);
   assert.match(prompt, /Generate exactly one new transparent-background T-shirt artwork/i);
@@ -756,7 +757,7 @@ test("v0.9.33 prompts use a neutral compact new-image marker", () => {
   assert.doesNotMatch(prompt, /uploaded artwork itself|source image|image target/i);
 });
 
-test("v0.9.33 new-image prompts stay compact and avoid edit-routing vocabulary", () => {
+test("v0.9.34 new-image prompts stay compact and avoid edit-routing vocabulary", () => {
   const initial = buildArtworkPrompt({ jobId: JOB_ID, profile: DEFAULT_BOOK_LOVER_PROFILE });
   const retry = buildArtworkRetryPrompt(JOB_ID, 1, initial);
   for (const prompt of [initial, retry]) {
@@ -772,7 +773,7 @@ test("v0.9.5 recognizes the Vietnamese image-routing refusal shown by ChatGPT", 
   assert.match(chat, /ch\[iỉ\]nh s\[uử\]a \[aả\]nh c\[oó\] s\[aẵ\]n/);
 });
 
-test("v0.9.33 retry prompt keeps one neutral marker and never nests routing headers", () => {
+test("v0.9.34 retry prompt keeps one neutral marker and never nests routing headers", () => {
   const source = buildArtworkPrompt({ jobId: JOB_ID, profile: DEFAULT_BOOK_LOVER_PROFILE });
   const retry = buildArtworkRetryPrompt(JOB_ID, 1, source);
   assert.equal((retry.match(/MERCH_FLOW_IMAGE_REQUEST: NEW/g) || []).length, 1);
@@ -882,7 +883,7 @@ test("v0.9.9 expected-job listing reads do not advance unrelated ChatGPT tabs", 
 });
 
 
-test("v0.9.33 uses a guarded compact-image fallback instead of falsely confirming Create image", () => {
+test("v0.9.34 uses a guarded compact-image fallback instead of falsely confirming Create image", () => {
   const chat = fs.readFileSync(path.join(__dirname, "..", "chatgpt-content.js"), "utf8");
   assert.match(chat, /function canUseSafeTextToImageFallback/);
   assert.match(chat, /explicitTextToImagePrompt/);
@@ -1058,7 +1059,7 @@ test("v0.9.15 blocks known old conversation paths across ChatGPT SPA navigation"
 test("v0.9.15 closes the previous managed chat before loading the fresh tab", () => {
   const background = fs.readFileSync(path.join(__dirname, "..", "background.js"), "utf8");
   const start = background.indexOf("async function startFreshChatJob");
-  const end = background.indexOf("async function openBatchChat", start);
+  const end = background.indexOf("async function clearTransientFlowData", start);
   const body = background.slice(start, end);
   assert.ok(body.indexOf("chrome.tabs.remove(previousManagedId)") < body.indexOf("chrome.tabs.update(blankTab.id"));
 });
@@ -1176,16 +1177,22 @@ test("v0.9.23 binds fallback artwork to its assistant message and repairs legacy
   assert.match(captureBody, /chatArtwork: \{ \.\.\.storedArtwork, artworkMessageIndex: candidate\.messageIndex \}/);
 });
 
-test("v0.9.24 falls back to native checked state events for Amazon Angular product boxes", () => {
-  const merch = fs.readFileSync(path.join(__dirname, "..", "merch-content.js"), "utf8");
-  const start = merch.indexOf("async function setCheckboxState");
-  const end = merch.indexOf("function checkboxControls", start);
-  const body = merch.slice(start, end);
-  assert.match(body, /checkbox instanceof HTMLInputElement/);
-  assert.match(body, /Object\.getOwnPropertyDescriptor\(Input\.prototype, "checked"\)/);
-  assert.match(body, /new Evt\("input", \{ bubbles: true, composed: true \}\)/);
-  assert.match(body, /new Evt\("change", \{ bubbles: true, composed: true \}\)/);
-  assert.match(body, /return checkboxState\(checkbox\) === desired/);
+test("v0.9.34 Vault metadata strips artwork base64 and profile reference payloads", () => {
+  const source = fs.readFileSync(path.join(__dirname, "..", "vault-db.js"), "utf8");
+  const sandbox = {};
+  vm.runInNewContext(source, sandbox);
+  const metadata = sandbox.MerchFlowVaultDB.metadataFromDesign({
+    id: "d1",
+    jobId: "j1",
+    createdAt: 1,
+    artworkDataUrl: "data:image/png;base64,AAAA",
+    artworkName: "a.png",
+    listing: { title: "T", description: "D" },
+    nicheProfile: { name: "book lovers", referenceDataUrl: "data:image/png;base64,BBBB" }
+  });
+  assert.equal(metadata.artworkStore, "indexeddb");
+  assert.equal(metadata.artworkDataUrl, undefined);
+  assert.equal(metadata.nicheProfile.referenceDataUrl, "");
 });
 
 test("v0.9.25 requires stable artwork acceptance before listing handoff", () => {
@@ -1194,7 +1201,7 @@ test("v0.9.25 requires stable artwork acceptance before listing handoff", () => 
   assert.match(merch, /let positiveSince = 0/);
   assert.match(merch, /Date\.now\(\) - positiveSince >= 1800/);
   assert.match(merch, /listingBusySince && Date\.now\(\) - listingBusySince > 45000/);
-  assert.match(merch, /ensureReviewPublishControl/);
+  assert.match(merch, /highlightReviewPublishControl/);
   assert.match(merch, /manualProductSelectionRequired/);
   const attemptStart = merch.indexOf("async function attemptPendingListing");
   const attemptEnd = merch.indexOf("async function executeUpload", attemptStart);
@@ -1204,15 +1211,12 @@ test("v0.9.25 requires stable artwork acceptance before listing handoff", () => 
   assert.doesNotMatch(attemptBody, /ensureReviewPublishControl\(pendingUpload\.uploadId\)/);
 });
 
-test("v0.9.26 uses native Amazon checkbox events before the slow click fallback", () => {
-  const merch = fs.readFileSync(path.join(__dirname, "..", "merch-content.js"), "utf8");
-  const start = merch.indexOf("async function setCheckboxState");
-  const end = merch.indexOf("function checkboxControls", start);
-  const body = merch.slice(start, end);
-  const nativeSetter = body.indexOf('Object.getOwnPropertyDescriptor(Input.prototype, "checked")');
-  const clickFallback = body.indexOf("checkbox.click()");
-  assert.ok(nativeSetter >= 0 && clickFallback > nativeSetter);
-  assert.ok(body.indexOf("if (checkboxState(checkbox) === desired) return true;", nativeSetter) < clickFallback);
+test("v0.9.34 ChatGPT polling is lazy and owned-job gated", () => {
+  const chat = fs.readFileSync(path.join(__dirname, "..", "chatgpt-content.js"), "utf8");
+  assert.match(chat, /function startAutoCaptureWatchers/);
+  assert.match(chat, /async function armAutoCaptureWatchersForOwnedJob/);
+  assert.match(chat, /!jobBelongsToThisChat\(job\)/);
+  assert.doesNotMatch(chat, /const observer = new MutationObserver/);
 });
 
 test("v0.9.28 revalidates live artwork and takes over stale Amazon runtimes", () => {
@@ -1231,4 +1235,20 @@ test("v0.9.28 revalidates live artwork and takes over stale Amazon runtimes", ()
   assert.match(fs.readFileSync(path.join(__dirname, "..", "background.js"), "utf8"), /MERCH_FLOW_REGISTER_MERCH_TAB_V1/);
   assert.match(merch, /Re-enter executeUpload so a page reload/);
   assert.doesNotMatch(merch, /else if \(\["artwork-set", "waiting-listing", "selecting-products"\]\.[\s\S]{0,100}ensureListingWatcher\(\);\s*scheduleListingAttempt\(300\)/);
+});
+
+
+test("v0.9.34 background cleans closed Amazon runtime registrations", () => {
+  const background = fs.readFileSync(path.join(__dirname, "..", "background.js"), "utf8");
+  assert.match(background, /delete runtimes\[String\(tabId\)\]/);
+  assert.match(background, /update\[AMAZON_RUNTIME_STORAGE_KEY\] = runtimes/);
+});
+
+test("v0.9.34 manifest drops unused activeTab and loads Vault helper", () => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "manifest.json"), "utf8"));
+  const html = fs.readFileSync(path.join(__dirname, "..", "popup.html"), "utf8");
+  const background = fs.readFileSync(path.join(__dirname, "..", "background.js"), "utf8");
+  assert.equal(manifest.permissions.includes("activeTab"), false);
+  assert.match(html, /vault-db\.js/);
+  assert.match(background, /importScripts\("merch-flow-core\.js", "vault-db\.js"\)/);
 });
