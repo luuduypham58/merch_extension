@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Merch Flow v0.9.33",
-  "version": "0.9.33",
-  "description": "Merch Flow v0.9.33: creative-lane prompts diversify reader situations and visual constructions while staying compact.",
+  "name": "Merch Flow v0.9.34",
+  "version": "0.9.34",
+  "description": "Merch Flow v0.9.34: strict tab ownership, manual product handoff, IndexedDB Vault, and runtime hardening.",
   "action": {
     "default_title": "Mở Merch Flow ở Side Panel"
   },
@@ -16,7 +16,6 @@
     "storage",
     "unlimitedStorage",
     "sidePanel",
-    "activeTab",
     "scripting",
     "clipboardWrite",
     "clipboardRead",
