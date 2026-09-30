@@ -1,8 +1,8 @@
-# Merch Flow v0.9.33
+# Merch Flow v0.9.34
 
 > **Cài sạch một lần:** vào `chrome://extensions`, gỡ hoặc tắt TOÀN BỘ bản Merch Flow cũ (0.8.x), rồi chỉ Load unpacked thư mục v0.9.33 này. Các bản unpacked cũ có extension ID khác nhau nên nếu cùng bật, chúng sẽ cùng điều khiển một tab ChatGPT. Từ v0.9.0 manifest có stable `key` để các bản sau dùng cùng một extension ID.
 
-Core fix v0.9.33: artwork prompt vẫn compact để giữ text-to-image route ổn định, nhưng mỗi job được gán một creative lane gồm reader-situation territory + visual construction. Không còn khóa cứng top-text / một stick figure / bottom-punchline; Vault lưu creative fingerprint để tránh lặp cả tình huống lẫn bố cục.
+v0.9.34 hardening: Vault artwork chuyển sang IndexedDB, tab ownership chỉ dựa trên Job ID/tab ID/session state, update không reload các tab cá nhân, và Amazon dừng ở artwork + listing 5/5 để người bán tự chọn sản phẩm/màu.
 
 ---
 
