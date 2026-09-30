@@ -1,0 +1,59 @@
+{
+  "manifest_version": 3,
+  "name": "Merch Flow v0.9.33",
+  "version": "0.9.33",
+  "description": "Merch Flow v0.9.33: creative-lane prompts diversify reader situations and visual constructions while staying compact.",
+  "action": {
+    "default_title": "Mở Merch Flow ở Side Panel"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "side_panel": {
+    "default_path": "popup.html"
+  },
+  "permissions": [
+    "storage",
+    "unlimitedStorage",
+    "sidePanel",
+    "activeTab",
+    "scripting",
+    "clipboardWrite",
+    "clipboardRead",
+    "alarms",
+    "webNavigation"
+  ],
+  "host_permissions": [
+    "https://merch.amazon.com/*",
+    "https://chatgpt.com/*",
+    "https://chat.openai.com/*",
+    "https://*.openai.com/*",
+    "https://*.oaiusercontent.com/*",
+    "https://*.blob.core.windows.net/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://merch.amazon.com/*"
+      ],
+      "js": [
+        "merch-flow-core.js",
+        "merch-content.js"
+      ],
+      "all_frames": false,
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*"
+      ],
+      "js": [
+        "merch-flow-core.js",
+        "chatgpt-content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqVTS+ThrQ5eJfALTcNuW/OdxcNMf11DeXCbW9/sJkbLokoz37XeAnHG/PNGB21Fw1qiyf1539b49UJ+XYPXNrKE9oHeRw4aEC4zqKMESSvT1niDROCaD9u7/yUxNI8sdz4ucMuo4B/+oB+DNlazzaZSXjTSJfQSkoNU8Ezk7p/NQOQNXyr0ind/xJwu8TyJQ3V7ey4G+eFWYbgmZFmfhOKfwFjpS89ecsM0WPgGyaJ0CN5Pgh/NpVVq4HJH81IAt7v8aWBk5YMlOI3sYvKbA+y6BgZtxqYMu4hUMjg+WAJ4/SIIib0xUmzPO6BxMHNhqW0wKPk5wJdpPbwKy4UNTswIDAQAB"
+}

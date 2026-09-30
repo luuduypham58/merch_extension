@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Merch Flow</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div class="brand-mark" aria-hidden="true">MF</div>
+        <div>
+          <p class="eyebrow">MERCH TOOLKIT</p>
+          <h1>Merch Flow</h1>
+        </div>
+        <span class="local-pill"><span class="status-dot"></span>Local-first</span>
+      </header>
+
+      <div class="tabs" role="tablist" aria-label="Merch Flow tools">
+        <button class="tab is-active" id="tab-image" role="tab" aria-selected="true" aria-controls="panel-image">Xử lý ảnh</button>
+        <button class="tab" id="tab-ideas" role="tab" aria-selected="false" aria-controls="panel-ideas">Ý tưởng → ChatGPT</button>
+        <button class="tab" id="tab-vault" role="tab" aria-selected="false" aria-controls="panel-vault">Kho mẫu</button>
+      </div>
+
+      <section class="flow-guide" aria-live="polite">
+        <div class="flow-guide-head">
+          <strong>Luồng hiện tại</strong>
+          <span id="flow-job">Chưa có job</span>
+        </div>
+        <div class="flow-steps" aria-label="Tiến độ Merch Flow">
+          <span class="flow-step" id="flow-step-prompt"><b>1</b>Prompt</span>
+          <span class="flow-step" id="flow-step-artwork"><b>2</b>Artwork</span>
+          <span class="flow-step" id="flow-step-listing"><b>3</b>Listing</span>
+          <span class="flow-step" id="flow-step-merch"><b>4</b>Merch</span>
+        </div>
+        <div class="auto-launch">
+          <div class="auto-launch-copy">
+            <strong>AUTO ẢNH + LISTING · Book Lovers</strong>
+            <span>1 click: ChatGPT tạo mẫu + listing → chuẩn hoá → điền 5 trường Merch. Anh tự chọn sản phẩm/màu rồi review.</span>
+          </div>
+          <div class="auto-launch-actions">
+            <button class="button primary auto-launch-button" id="auto-book-flow">Chạy AUTO 1 click <span>↗</span></button>
+            <button class="button danger auto-cancel-button" id="cancel-auto-flow" hidden>Hủy AUTO</button>
+          </div>
+        </div>
+        <p class="flow-next" id="flow-next">Mặc định ngách book lovers. Bấm “Chạy AUTO 1 click” để tạo ảnh, chuẩn hoá PNG và điền listing.</p>
+        <div class="flow-actions">
+          <button class="button secondary compact" id="resume-flow">Tiếp tục job hiện tại</button>
+          <button class="button secondary compact" id="regenerate-flow">Tạo lại artwork</button>
+        </div>
+        <details class="help-card">
+          <summary>Xong rồi làm gì?</summary>
+          <div class="help-copy">
+            <p><b>AUTO 1 click:</b> mặc định ngách book lovers; ChatGPT tạo ảnh → extension lấy ảnh → xin JSON nếu thiếu → chuẩn hoá PNG → điền 5 trường Amazon Merch.</p>
+            <p><b>Trên Amazon:</b> extension tự chọn 1 sản phẩm chủ đạo + 9 sản phẩm phù hợp ở .com, điền đủ 5 ô listing, rồi đưa anh tới bước review. Không tự Publish.</p>
+            <p><b>Khi kẹt:</b> bấm <b>Hủy AUTO</b> để dừng ngay automation hiện tại và reset job treo, không cần reload tab. Sau đó có thể chạy AUTO mới hoặc tạo lại artwork.</p>
+          </div>
+        </details>
+      </section>
+
+      <section class="panel is-active" id="panel-image" role="tabpanel" aria-labelledby="tab-image">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow accent">01 / ARTWORK</p>
+            <h2>Chuẩn hoá design</h2>
+          </div>
+          <span class="spec-chip">PNG · 4500 × 5400</span>
+        </div>
+
+        <label class="dropzone" id="dropzone" for="file-input">
+          <input id="file-input" type="file" accept="image/png,image/jpeg,image/webp,image/*" />
+          <span class="upload-icon" aria-hidden="true">↑</span>
+          <span class="drop-title">Kéo thả artwork vào đây</span>
+          <span class="drop-hint">hoặc bấm để chọn · PNG, JPG, WEBP</span>
+        </label>
+        <div class="manual-artwork-row">
+          <span id="artwork-source" class="manual-source">Chưa chọn artwork cuối</span>
+          <span class="manual-artwork-actions">
+            <button class="text-button" id="pick-image-manual" type="button">Chọn ảnh thủ công</button>
+            <button class="text-button" id="paste-image" type="button">Dán ảnh clipboard</button>
+          </span>
+        </div>
+        <div class="file-meta is-hidden" id="file-meta">
+          <span class="file-icon">▧</span>
+          <div class="file-copy"><strong id="file-name">—</strong><span id="file-size">—</span></div>
+          <button class="icon-button" id="clear-file" aria-label="Xoá file">×</button>
+        </div>
+
+        <div class="preview-wrap is-hidden" id="preview-wrap">
+          <div class="preview-header"><span>Preview output</span><span id="output-size">4500 × 5400 px</span></div>
+          <div class="preview-stage"><canvas id="preview-canvas" width="450" height="540" aria-label="Preview artwork"></canvas><span class="preview-empty" id="preview-empty">Chưa có preview</span></div>
+        </div>
+
+        <div class="controls-grid">
+          <label class="field"><span>Template</span><select id="template"><option value="tshirt">T-shirt / Premium</option><option value="hoodie">Hoodie (4500 × 4050)</option><option value="popsocket">PopSocket (4167 × 4167)</option></select></label>
+          <label class="field"><span>Cách đặt ảnh</span><select id="fit-mode"><option value="contain">Giữ trọn artwork</option><option value="cover">Lấp đầy canvas</option></select></label>
+          <label class="field"><span>Lề an toàn</span><select id="safe-margin"><option value="0.06">6% — khuyên dùng</option><option value="0.04">4% — artwork lớn</option><option value="0.08">8% — thoáng</option><option value="0">Không chừa lề</option></select></label>
+        </div>
+        <div class="toggle-row">
+          <label class="switch-label"><input type="checkbox" id="winner-white-only" checked /><span class="switch"></span><span>Winner: ép toàn bộ design thành trắng + nền trong suốt</span></label>
+          <span class="muted">khuyên dùng cho mẫu áo đen/pictogram</span>
+        </div>
+        <div class="toggle-row">
+          <label class="switch-label"><input type="checkbox" id="remove-white" /><span class="switch"></span><span>Xoá nền trắng ở viền (legacy)</span></label>
+          <span class="muted">chỉ dùng khi tắt Winner trắng-only</span>
+        </div>
+
+        <details class="listing-details" open>
+          <summary><span>Listing đã sẵn sàng</span><span class="summary-hint">lấy từ ChatGPT hoặc nhập tay</span></summary>
+          <div class="listing-body">
+            <div class="listing-toolbar"><span id="listing-source">Chưa có nội dung</span><span class="listing-actions"><button class="text-button" id="import-listing">Lấy từ ChatGPT</button><button class="text-button" id="fill-listing">Điền listing ở form</button></span></div>
+            <label class="field full"><span>Title <em id="listing-title-count">0 / 60</em></span><input id="listing-title" type="text" maxlength="60" placeholder="Product title dưới 60 ký tự" /></label>
+            <label class="field full"><span>Brand</span><input id="listing-brand" type="text" placeholder="Tên brand dùng cho ngách này" /></label>
+            <label class="field full"><span>Bullet 1</span><textarea id="listing-bullet1" rows="2" placeholder="Ai sẽ thích design này…"></textarea></label>
+            <label class="field full"><span>Bullet 2</span><textarea id="listing-bullet2" rows="2" placeholder="Dịp tặng, phong cách, cách dùng…"></textarea></label>
+            <label class="field full"><span>Description</span><textarea id="listing-description" rows="3" placeholder="Mô tả ngắn, tự nhiên, không nhồi keyword…"></textarea></label>
+            <div class="manual-listing-actions">
+              <button class="button secondary compact" id="save-final-listing" type="button">Lưu listing cuối</button>
+              <button class="button secondary compact" id="paste-listing-json" type="button">Dán JSON</button>
+            </div>
+            <details class="raw-json-details">
+              <summary>JSON thủ công / fallback</summary>
+              <textarea id="listing-raw-json" rows="6" spellcheck="false" placeholder='Dán JSON có title, brand, bullet1, bullet2, description…'></textarea>
+              <div class="raw-json-actions">
+                <button class="text-button" id="apply-listing-json" type="button">Áp dụng JSON</button>
+                <button class="text-button" id="copy-final-json" type="button">Copy JSON cuối</button>
+              </div>
+            </details>
+          </div>
+        </details>
+
+        <div class="action-row image-actions">
+          <button class="button secondary" id="process-image" disabled>Chuẩn hoá ảnh</button>
+          <button class="button secondary" id="finalize-artwork" disabled>Chốt ảnh này</button>
+          <button class="button secondary" id="download-image" disabled>Tải PNG</button>
+          <button class="button secondary" id="save-final-design" disabled>Lưu vào Kho mẫu</button>
+          <button class="button primary wide" id="upload-merch" disabled>Điền artwork + listing <span>↗</span></button>
+        </div>
+        <p class="helper" id="image-status">Extension tự lấy artwork mới nhất đúng Job ID, chọn 1 sản phẩm chủ đạo + 9 sản phẩm phù hợp ở .com và điền listing. Không tự bấm Submit.</p>
+      </section>
+
+      <section class="panel" id="panel-ideas" role="tabpanel" aria-labelledby="tab-ideas" hidden>
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow accent">02 / IDEATION</p>
+            <h2>Biến ý tưởng thành brief</h2>
+          </div>
+          <span class="sparkle">✦</span>
+        </div>
+        <div class="niche-card">
+          <div class="niche-card-head"><span>Ngách cố định</span><span class="saved-badge">auto-save</span></div>
+          <label class="field full"><span>Tên ngách</span><input id="niche-name" type="text" placeholder="Ví dụ: funny pickleball grandpas" /></label>
+          <label class="field full"><span>DNA của style thắng</span><textarea id="winning-style" rows="3" placeholder="Bố cục, bảng màu, nét vẽ, kiểu chữ, cảm xúc… Không chép nội dung mẫu."></textarea></label>
+          <div class="reference-row"><label class="reference-picker" for="reference-input"><input id="reference-input" type="file" accept="image/*" /><span id="reference-label">＋ Lưu mẫu thắng local (không gửi ChatGPT)</span></label><button class="icon-button is-hidden" id="clear-reference" type="button" aria-label="Xoá ảnh tham chiếu">×</button></div>
+        </div>
+        <label class="field full"><span>Ý tưởng gốc <em>(để trống nếu muốn ChatGPT tự tìm)</em></span><textarea id="idea" rows="4" placeholder="Ví dụ: một tình huống, câu nói hoặc nhóm khách hàng muốn thử…"></textarea></label>
+        <div class="controls-grid">
+          <label class="field"><span>Ngôn ngữ</span><select id="idea-language"><option value="English">English listing copy</option><option value="Vietnamese">Tiếng Việt</option><option value="bilingual">Song ngữ</option></select></label>
+          <label class="field"><span>Phong cách</span><select id="idea-style"><option value="monochrome pictogram">Monochrome pictogram</option><option value="clean retro">Clean retro</option><option value="bold vintage">Bold vintage</option><option value="minimal line art">Minimal line art</option><option value="playful hand-drawn">Playful hand-drawn</option><option value="streetwear">Streetwear</option></select></label>
+        </div>
+        <label class="field full"><span>Khách hàng mục tiêu <em>(tuỳ chọn)</em></span><input id="idea-audience" type="text" placeholder="coffee lovers, teachers, new dads…" /></label>
+        <label class="field full"><span>Điều cần tránh <em>(tuỳ chọn)</em></span><input id="idea-avoid" type="text" placeholder="brand names, copyrighted characters, clichés…" /></label>
+        <div class="prompt-card"><div class="prompt-card-head"><span>Prompt có Job ID thật</span><button class="text-button" id="copy-prompt">Copy + Job ID</button></div><p id="prompt-preview">Nhập ý tưởng để xem prompt…</p></div>
+        <div class="action-row"><button class="button secondary" id="generate-brief">Xem prompt</button><button class="button primary" id="send-chatgpt">Tìm ý tưởng + vẽ <span>↗</span></button></div>
+        <p class="helper" id="idea-status">Mặc định đã cấu hình ngách book lovers. Có thể dùng AUTO 1 click hoặc chỉnh brief thủ công rồi gửi.</p>
+      </section>
+
+
+      <section class="panel" id="panel-vault" role="tabpanel" aria-labelledby="tab-vault" hidden>
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow accent">03 / BATCH VAULT</p>
+            <h2>Làm trước, mai đăng</h2>
+          </div>
+          <span class="spec-chip">Book lovers</span>
+        </div>
+
+        <div class="vault-intro">
+          <strong>Tạo liên tục nhưng không mở Amazon Merch</strong>
+          <p>ChatGPT tạo từng artwork + listing, extension tự lưu vào Kho mẫu. Mai mở Add New, chọn mẫu đã lưu và bấm “Đưa lên Merch”.</p>
+        </div>
+
+        <div class="batch-card">
+          <div class="batch-grid">
+            <label class="field"><span>Số mẫu cần làm</span><input id="batch-count" type="number" min="1" max="25" value="10" /></label>
+            <div class="batch-progress-wrap">
+              <span>Tiến độ</span>
+              <strong id="batch-progress">0 / 10</strong>
+            </div>
+          </div>
+          <div class="progress-track" aria-hidden="true"><span id="batch-progress-bar"></span></div>
+          <p class="helper batch-status" id="batch-status">Chưa chạy batch. Mẫu sẽ lưu local trong extension, không dùng quota Amazon.</p>
+          <div class="action-row batch-actions">
+            <button class="button primary" id="batch-start">Bắt đầu làm liên tục</button>
+            <button class="button secondary" id="batch-pause" disabled>Tạm dừng</button>
+            <button class="button secondary" id="batch-stop" disabled>Dừng</button>
+          </div>
+        </div>
+
+        <div class="vault-toolbar">
+          <div><strong id="vault-count">0 mẫu đã lưu</strong><span>Ảnh + listing đi cùng nhau</span></div>
+          <div class="vault-toolbar-actions">
+            <button class="text-button" id="vault-export-all">Xuất ZIP</button>
+            <label class="text-button file-import" for="vault-import"><input id="vault-import" type="file" accept=".json,.merchflow,application/json" />Nhập gói</label>
+            <button class="text-button danger" id="vault-clear">Xoá hết</button>
+          </div>
+        </div>
+        <div class="vault-list" id="vault-list">
+          <div class="vault-empty">Chưa có mẫu. Chọn số lượng rồi bấm “Bắt đầu làm liên tục”.</div>
+        </div>
+
+        <details class="help-card vault-help">
+          <summary>Ngày mai đăng thế nào?</summary>
+          <div class="help-copy">
+            <p>1. Mở <b>Kho mẫu</b> và chọn mẫu cần đăng.</p>
+            <p>2. Bấm <b>Đưa lên Merch</b>. Extension tự chuẩn hoá PNG 4500 × 5400, mở <b>/designs/new</b> và điền 5 trường listing. Anh tự chọn sản phẩm/màu.</p>
+            <p>3. Anh review rồi bấm Publish. Extension không tự Publish.</p>
+          </div>
+        </details>
+      </section>
+
+      <footer class="footer"><span>Merch Flow v0.9.33</span><span>Pinned Side Panel</span></footer>
+    </main>
+    <script src="merch-flow-core.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>
