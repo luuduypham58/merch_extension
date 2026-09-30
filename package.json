@@ -1,10 +1,10 @@
 {
   "name": "merch-flow-extension",
-  "version": "0.9.33",
+  "version": "0.9.34",
   "private": true,
   "description": "Local-first Chrome extension for Merch artwork preparation and ChatGPT ideation.",
   "scripts": {
-    "check": "node --check background.js && node --check merch-flow-core.js && node --check popup.js && node --check merch-content.js && node --check chatgpt-content.js",
+    "check": "node --check background.js && node --check vault-db.js && node --check merch-flow-core.js && node --check popup.js && node --check merch-content.js && node --check chatgpt-content.js",
     "test": "npm run check && node --test tests/*.test.js"
   }
 }
