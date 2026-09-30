@@ -1,6 +1,6 @@
 (function merchFlowChatGPT() {
   const Core = globalThis.MerchFlowCore;
-  const SCRIPT_VERSION = "0.9.33";
+  const SCRIPT_VERSION = "0.9.34";
   if (!Core || globalThis.__MERCH_FLOW_CHAT_SCRIPT_VERSION__ === SCRIPT_VERSION) return;
   try { globalThis.__MERCH_FLOW_CHAT_CLEANUP__?.(); } catch (_) { /* previous v0.9+ instance */ }
   globalThis.__MERCH_FLOW_CHAT_SCRIPT_VERSION__ = SCRIPT_VERSION;
@@ -1563,8 +1563,25 @@
     flowTimer = setTimeout(() => autoCaptureFlow().catch(() => {}), delay);
   }
 
-  const observer = new MutationObserver(() => scheduleAutoFlow());
-  observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+  let observer = null;
+
+  function startAutoCaptureWatchers() {
+    if (!observer) {
+      observer = new MutationObserver(() => scheduleAutoFlow());
+      observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+    }
+    if (!flowInterval) flowInterval = setInterval(() => autoCaptureFlow().catch(() => {}), 2500);
+  }
+
+  async function armAutoCaptureWatchersForOwnedJob(expectedJobId = "") {
+    await registrationPromise;
+    const data = await chrome.storage.local.get(["pendingChatJob", "lastSentChatJob"]);
+    const candidates = [data.lastSentChatJob, data.pendingChatJob].filter(Boolean);
+    const job = candidates.find((candidate) => !expectedJobId || candidate.jobId === expectedJobId) || candidates[0];
+    if (!job?.jobId || !jobBelongsToThisChat(job)) return false;
+    startAutoCaptureWatchers();
+    return true;
+  }
 
   async function regenerateArtworkInCurrentConversation(message) {
     const jobId = String(message?.jobId || "").trim();
@@ -1946,6 +1963,7 @@
       await chrome.storage.local.remove("pendingChatJob");
       await setChatStatus("Đã gửi đúng brief có Job ID. Extension sẽ tự lấy artwork, xin listing và chuyển sang Merch.", "success", pendingChatJob.jobId);
       if (initialJobFromUrl) history.replaceState({}, document.title, location.pathname + location.hash);
+      armAutoCaptureWatchersForOwnedJob(pendingChatJob.jobId).catch(() => {});
       scheduleAutoFlow(500);
       return { sent: true, jobId: pendingChatJob.jobId };
     } catch (error) {
@@ -1959,7 +1977,7 @@
   globalThis.__MERCH_FLOW_CHAT_CLEANUP__ = () => {
     clearTimeout(flowTimer);
     if (flowInterval) clearInterval(flowInterval);
-    try { observer.disconnect(); } catch (_) { /* already disconnected */ }
+    try { observer?.disconnect(); } catch (_) { /* already disconnected */ }
     flowTimer = 0;
     flowInterval = 0;
   };
@@ -1967,8 +1985,7 @@
   purgeLegacyCanvasArtifacts()
     .catch(() => false)
     .then(() => repairExhaustedArtworkStatus().catch(() => false))
-    .finally(() => scheduleAutoFlow(250));
-  if (!flowInterval) flowInterval = setInterval(() => autoCaptureFlow().catch(() => {}), 2500);
+    .finally(() => armAutoCaptureWatchersForOwnedJob(initialJobFromUrl || registeredJobId).catch(() => false));
   if (initialJobFromUrl) {
     runChatJob({ expectedJobId: initialJobFromUrl });
   } else {
