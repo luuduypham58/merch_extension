@@ -53,7 +53,7 @@
           <summary>Xong rồi làm gì?</summary>
           <div class="help-copy">
             <p><b>AUTO 1 click:</b> mặc định ngách book lovers; ChatGPT tạo ảnh → extension lấy ảnh → xin JSON nếu thiếu → chuẩn hoá PNG → điền 5 trường Amazon Merch.</p>
-            <p><b>Trên Amazon:</b> extension tự chọn 1 sản phẩm chủ đạo + 9 sản phẩm phù hợp ở .com, điền đủ 5 ô listing, rồi đưa anh tới bước review. Không tự Publish.</p>
+            <p><b>Trên Amazon:</b> extension xác nhận artwork, điền đủ 5 ô listing rồi dừng. Anh tự chọn sản phẩm/màu phù hợp trước khi review. Không tự Publish.</p>
             <p><b>Khi kẹt:</b> bấm <b>Hủy AUTO</b> để dừng ngay automation hiện tại và reset job treo, không cần reload tab. Sau đó có thể chạy AUTO mới hoặc tạo lại artwork.</p>
           </div>
         </details>
@@ -137,7 +137,7 @@
           <button class="button secondary" id="save-final-design" disabled>Lưu vào Kho mẫu</button>
           <button class="button primary wide" id="upload-merch" disabled>Điền artwork + listing <span>↗</span></button>
         </div>
-        <p class="helper" id="image-status">Extension tự lấy artwork mới nhất đúng Job ID, chọn 1 sản phẩm chủ đạo + 9 sản phẩm phù hợp ở .com và điền listing. Không tự bấm Submit.</p>
+        <p class="helper" id="image-status">Extension tự lấy artwork mới nhất đúng Job ID, xác nhận upload và điền listing 5/5. Anh tự chọn sản phẩm/màu; extension không tự bấm Submit.</p>
       </section>
 
       <section class="panel" id="panel-ideas" role="tabpanel" aria-labelledby="tab-ideas" hidden>
@@ -220,9 +220,10 @@
         </details>
       </section>
 
-      <footer class="footer"><span>Merch Flow v0.9.33</span><span>Pinned Side Panel</span></footer>
+      <footer class="footer"><span>Merch Flow v0.9.34</span><span>Pinned Side Panel</span></footer>
     </main>
     <script src="merch-flow-core.js"></script>
+    <script src="vault-db.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>
